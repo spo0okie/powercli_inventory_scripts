@@ -1,4 +1,4 @@
-﻿
+﻿Add-Type -AssemblyName System.Web
 #отправляет данные в инвентаризацию
 #запись данных о пользователе в БД
 function sendInventoryData() {
@@ -10,17 +10,21 @@ function sendInventoryData() {
 	)
 	#$value=[System.Web.HttpUtility]::UrlEncode($value)
 
-	#Write-Host $method $uri
-	try { 
-    
-		$result=Invoke-WebRequest -Uri $uri -Method $method -Body $data #-UseBasicParsing
-		#Log("$($inventory_RESTapi_URL)/users/$($id)")
-		#Log("Success")
-		return ($result.content | convertFrom-Json)
-	} catch {
-		#Log("Error: $($_.Exception.Response.StatusCode.Value__): $($_.Exception.Message)")
-		$_.Exception.Response
-		$_.Exception.content
+	#Write-Host 
+	if ($write_inventory) {
+		try { 
+			$result=Invoke-WebRequest -Uri $uri -Method $method -Body $data #-UseBasicParsing
+			#Log("$($inventory_RESTapi_URL)/users/$($id)")
+			#Log("Success")
+			return ($result.content | convertFrom-Json)
+		} catch {
+			#Log("Error: $($_.Exception.Response.StatusCode.Value__): $($_.Exception.Message)")
+			$_.Exception.Response
+			$_.Exception.content
+		}
+	} else {
+		Write-Host RO MODE: Skip $method $uri
+		Write-Host $([System.Web.HttpUtility]::UrlDecode($data.replace("&","`n")))
 	}
 }
 

@@ -1,4 +1,4 @@
-﻿$lib_version="0.4.1powercli"
+﻿$lib_version="0.4.2powercli"
 $VMware_vendor="VMware"
 $VMware_ESXi="$($VMware_vendor) ESXi"
 
