@@ -10,7 +10,7 @@ function sendInventoryData() {
 	)
 	#$value=[System.Web.HttpUtility]::UrlEncode($value)
 
-	Write-Host $method $uri
+	#Write-Host $method $uri
 	try { 
     
 		$result=Invoke-WebRequest -Uri $uri -Method $method -Body $data #-UseBasicParsing
@@ -35,7 +35,7 @@ function getInventoryData() {
 	)
 
 	#пробуем найти запрошенные данные
-	Write-Host $webReq
+	#Write-Host $webReq
 	try { 
 		$obj = ((invoke-WebRequest $webReq -ContentType "text/plain; charset=utf-8" -UseBasicParsing).content | convertFrom-Json)
 		return $obj
@@ -57,6 +57,16 @@ function getInventoryDataId() {
 		return -1
 	}
 	return $obj.id
+}
+
+#возвращает ID по модели(типу данных) и ее имени
+function getInventoryObj() {
+	param
+	(
+		[string]$model,
+		[string]$name
+	)
+	return getInventoryData("$($inventory_RESTapi_URL)/$($model)/$($name)")
 }
 
 #возвращает ID по модели(типу данных) и ее имени
@@ -89,4 +99,21 @@ function setInventoryData() {
 	}
 	return $result
 }
- 
+
+#возвращает объект компа в инвентаризации по FQDN
+function getInventoryFqdnComp($fqdn) {
+	if ( -not $fqdn) {
+		return $false
+	}
+
+	#разбираем FQDN на хостнейм и домен
+	if ($fqdn.split('.').count -gt 1 ) {
+		$strComp=$fqdn.split('.')[0]
+		$strDomain=$fqdn.split('.')[1]
+	} else {
+		$strComp=$fqdn
+		$strDomain=$inventory_defaultDomain
+	}
+
+	return getInventoryObj 'comps' "$($strDomain)/$($strComp)"
+}
