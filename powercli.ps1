@@ -1,4 +1,4 @@
-﻿$lib_version="0.4powercli"
+﻿$lib_version="0.4.1powercli"
 $VMware_vendor="VMware"
 $VMware_ESXi="$($VMware_vendor) ESXi"
 
@@ -38,8 +38,8 @@ $VMifaces = Get-VMHostNetworkAdapter | select VMhost, IP
 #собираем хосты
 $VMhosts = Get-VMHost | select name,ProcessorType,NumCpu,Manufacturer,Model,MemoryTotalMB,Version,NetworkInfo
 
-<#
 
+#Хосты
 foreach ($VMhost in $VMhosts) {
 	#собираем мать из модели сервера
 	$strMb= "{`"motherboard`":{`"manufacturer`":`"$($VMhost.Manufacturer)`",`"product`":`"$($VMhost.Model)`",`"serial`":`"`"}}"
@@ -56,7 +56,7 @@ foreach ($VMhost in $VMhosts) {
 			$strIfaces="$($strIfaces)$($VMiface.IP)`n"
 		}
 	}
-	$vmhost
+	#$vmhost
 	$data=
 		"domain_id=$($intDomain)&", 
 		"name=$([System.Web.HttpUtility]::UrlEncode($strComp)) &", 
@@ -67,31 +67,14 @@ foreach ($VMhost in $VMhosts) {
 		"ip=$([System.Web.HttpUtility]::UrlEncode($strIfaces))&",
 		"updated_at=$([System.Web.HttpUtility]::UrlEncode($strNow))"
 
-	$data
+	#$data
 	if ([int]$intDomain -gt 0) {
 		$intComp=getInventoryId 'comps' "$($strDomain)/$($strComp)"
-		setInventoryData 'comps' $intComp $data
+		setInventoryData 'comps' $intComp $data | out-null
 	}
 }
 
-$VMs = get-VM | select name,PowerState,NumCpu,MemoryGb,ProvisionedSpaceGB,Guest | Tee-object -Variable VM | Foreach-object{
-	if ($_.PowerState -eq 'PoweredOn' ) {
-		$_
-		get-vmguest -VM $_ | select vmName,Hostname,OSFullName,GuestFamily,Disks,IPAddress
-	}
-}
-
-#>
-
-#$VMs = get-VM | select name,PowerState,NumCpu,MemoryGb,ProvisionedSpaceGB,Guest
-#foreach ($VM in $VMs)  {
-#get-VM | select name,PowerState,NumCpu,MemoryGb,ProvisionedSpaceGB,Guest | Tee-object -Variable VM | get-vmguest select vmName,Hostname,OSFullName,GuestFamily,Disks,IPAddress | Foreach-object{
-#	$VM
-#	$_
-#}
-
-#https://communities.vmware.com/thread/571475
-
+#Виртуалки
 $VMs = get-VM | select name,PowerState,NumCpu,MemoryGb,ProvisionedSpaceGB,Guest,VMHost
 foreach( $VM in $VMs) {
 	if ($VM.PowerState -eq 'PoweredOn' ) {
@@ -123,7 +106,7 @@ foreach( $VM in $VMs) {
 			} else {
 				#нету ножек - нет варенья
 				$intArm=$false
-				Write-Host not found $VM.VMHost.name
+				Write-Host HOST ARM NOT FOUND $VM.VMHost.name
 			}
 
 			$strNow=Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -136,7 +119,6 @@ foreach( $VM in $VMs) {
 				#если есть, то мы просто помещаем ее в тот, АРМ, на хосте которого она крутится
 				#если нет, то мы полностью отправляем информацию о ней
 				$objComp=getInventoryObj 'comps' "$($strDomain)/$($strComp)"
-				#$objComp
 
 				$data=
 					"domain_id=$($intDomain)&", 
@@ -149,7 +131,7 @@ foreach( $VM in $VMs) {
 					"updated_at=$([System.Web.HttpUtility]::UrlEncode($strNow))"
 				if ($intArm) {
 					$data="$($data)&arm_id=$($intArm)"
-				}
+				} 
 
 				#ОС есть в БД, она создана не этим скриптом и мы знаем в какой АРМ ее положить
 				if ($objComp -and $intArm -and ( -not $objComp.raw_version.contains("powercli"))) {
