@@ -1,4 +1,4 @@
-﻿$lib_version="0.4.2powercli"
+﻿$lib_version="0.5powercli"
 $VMware_vendor="VMware"
 $VMware_ESXi="$($VMware_vendor) ESXi"
 
@@ -38,6 +38,7 @@ $VMifaces = Get-VMHostNetworkAdapter | select VMhost, IP
 #собираем хосты
 $VMhosts = Get-VMHost | select name,ProcessorType,NumCpu,Manufacturer,Model,MemoryTotalMB,Version,NetworkInfo
 
+Write-Host VMHosts -------------------
 
 #Хосты
 foreach ($VMhost in $VMhosts) {
@@ -46,8 +47,13 @@ foreach ($VMhost in $VMhosts) {
 	$strCpu="{`"processor`":`"$($VMhost.ProcessorType) (x$($VMhost.NumCpu) cores)`"}"
 	$strMem="{`"memorybank`": {`"manufacturer`":`"$($VMhost.Manufacturer)`",`"capacity`":`"$([math]::Round($VMHost.MemoryTotalMb/1024,0)*1024)`",`"serial`":`"`"}}"
 	$strOS="$($VMware_ESXi), v$($VMHost.Version)"
-	$strComp=$VMhost.name.split('.')[0]
-	$strDomain=$VMhost.name.split('.')[1]
+	if ($VMhost.name -match "^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$") {
+		$strComp=$VMhost.NetworkInfo.Hostname
+		$strDomain=$VMhost.NetworkInfo.DomainName.split('.')[0]
+	} else { 
+		$strComp=$VMhost.name.split('.')[0]
+		$strDomain=$VMhost.name.split('.')[1]
+	}
 	$intDomain=getInventoryId 'domains' $strDomain
 	$strNow=Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 	$strIfaces=""
@@ -73,6 +79,7 @@ foreach ($VMhost in $VMhosts) {
 		setInventoryData 'comps' $intComp $data | out-null
 	}
 }
+Write-Host VMs -------------------
 
 #Виртуалки
 $VMs = get-VM | select name,PowerState,NumCpu,MemoryGb,ProvisionedSpaceGB,Guest,VMHost
@@ -99,14 +106,20 @@ foreach( $VM in $VMs) {
 			}
 
 			#Ищем, а есть ли уже в базе наш ESXi хост и есть ли у него АРМ?
-			$objESXi=getInventoryFqdnComp $VM.VMHost.name
+			if ($VM.VMhost.name -match "^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$") {
+				$strHost="$($VM.VMhost.NetworkInfo.Hostname).$($VM.VMhost.NetworkInfo.DomainName)"
+			} else { 
+				$strHost=$VM.VMHost.name
+			}
+	
+			$objESXi=getInventoryFqdnComp $strHost
 			if ($objESXi -and $objESXi.arm_id) {
 				#Все есть! Круть!
 				$intArm=$objESXi.arm_id
 			} else {
 				#нету ножек - нет варенья
 				$intArm=$false
-				Write-Host HOST ARM NOT FOUND $VM.VMHost.name
+				Write-Host HOST ARM NOT FOUND $strHost
 			}
 
 			$strNow=Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -124,7 +137,8 @@ foreach( $VM in $VMs) {
 					"domain_id=$($intDomain)&", 
 					"name=$([System.Web.HttpUtility]::UrlEncode($strComp)) &", 
 					"os=$([System.Web.HttpUtility]::UrlEncode($strOS))&",
-					"raw_hw=$([System.Web.HttpUtility]::UrlEncode("$($strCpu),$($strMem)"))&" ,
+					"raw_hw=$([System.Web.HttpUtility]::UrlEncode("$($strCpu),$($strMem)"))&",
+					"ignore_hw=1&",
 					"raw_soft=&",
 					"raw_version=$([System.Web.HttpUtility]::UrlEncode($lib_version))&",
 					"ip=$([System.Web.HttpUtility]::UrlEncode($strIfaces))&",
@@ -136,7 +150,7 @@ foreach( $VM in $VMs) {
 				#ОС есть в БД, она создана не этим скриптом и мы знаем в какой АРМ ее положить
 				if ($objComp -and $intArm -and ( -not $objComp.raw_version.contains("powercli"))) {
 					Write-Host Found $strComp by $objComp.raw_version '(moving)'
-					$data="arm_id=$($intArm)"
+					$data="arm_id=$($intArm)&ignore_hw=1"
 					setInventoryData 'comps' $objComp.id $data | out-null
 				} elseif ($objComp) {
 					Write-Host Updating $VMGuest.HostName
