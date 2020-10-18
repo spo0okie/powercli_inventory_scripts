@@ -13,12 +13,11 @@ function sendInventoryData() {
 	#Write-Host 
 	if ($write_inventory) {
 		try { 
-			$result=Invoke-WebRequest -Uri $uri -Method $method -Body $data #-UseBasicParsing
-			#Log("$($inventory_RESTapi_URL)/users/$($id)")
-			#Log("Success")
+			$result=Invoke-WebRequest -Uri $uri -Method $method -Body $data -UseBasicParsing
+			spooLog("$($method) $($inventory_RESTapi_URL)/users/$($id) - OK")
 			return ($result.content | convertFrom-Json)
 		} catch {
-			#Log("Error: $($_.Exception.Response.StatusCode.Value__): $($_.Exception.Message)")
+			#spooLog("Error: $($_.Exception.Response.StatusCode.Value__): $($_.Exception.Message)")
 			$_.Exception.Response
 			$_.Exception.content
 		}
@@ -39,12 +38,13 @@ function getInventoryData() {
 	)
 
 	#пробуем найти запрошенные данные
-	#Write-Host $webReq
 	try { 
 		$obj = ((invoke-WebRequest $webReq -ContentType "text/plain; charset=utf-8" -UseBasicParsing).content | convertFrom-Json)
+		spooLog("GET $webReq - OK")
 		return $obj
 	} catch {
 		#неудача!
+		spooLog("$($webReq) Error: $($_.Exception.Response.StatusCode.Value__): $($_.Exception.Message)")
 		$err=$_.Exception.Response.StatusCode.Value__
 		return $false
 	}
@@ -80,6 +80,9 @@ function getInventoryId() {
 		[string]$model,
 		[string]$name
 	)
+	if ($name.length -le 0) {
+		return -1
+	}
 	return getInventoryDataId("$($inventory_RESTapi_URL)/$($model)/$($name)")
 }
 

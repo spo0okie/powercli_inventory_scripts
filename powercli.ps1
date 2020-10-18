@@ -1,9 +1,6 @@
-﻿$lib_version="0.5powercli"
+﻿$lib_version="0.6powercli"
 $VMware_vendor="VMware"
 $VMware_ESXi="$($VMware_vendor) ESXi"
-
-. "$($PSScriptRoot)\config.priv.ps1"
-. "$($PSScriptRoot)\lib_inventory.ps1"
 
 #Install-Module -Name VMware.PowerCLI –AllowClobber
 #Set-ExecutionPolicy unrestricted
@@ -85,12 +82,25 @@ Write-Host VMs -------------------
 $VMs = get-VM | select name,PowerState,NumCpu,MemoryGb,ProvisionedSpaceGB,Guest,VMHost
 foreach( $VM in $VMs) {
 	if ($VM.PowerState -eq 'PoweredOn' ) {
-		#$VM
+		#запрос дополнительной информации недоступной через Get-VM (нам нужно число ядер на сокет)
+		
+		#три раза переделывал нижнюю строку. Я особо не вчитыался в доку по Get-View
+		#и к сожалению только методом проб и ошибок и кучи потерянного времени пришел к выводу что фильтр
+		#типа name="чтото" работает не сравнением строк а через Regex, а это значит что нужно
+		# 1. Экранировать служебные для регекспа символы
+		# 2. Явно обозначать что мы ищем ^name$ (^-начало строки, а $ - конец) иначе находятся name2, name_clone и т.п.
+		$VMView=Get-view  -ViewType VirtualMachine -filter @{"name"="^$([RegEx]::Escape($VM.Name))$"}
 		$VMGuest=get-vmguest $VM.name | select vmName,Hostname,OSFullName,GuestFamily,Disks,IPAddress
-		#$VMGuest
+		$VMGuest
+		$VMView.config.hardware
 		#$strMb= "{`"motherboard`":{`"manufacturer`":`"$($VMhost.Manufacturer)`",`"product`":`"$($VMhost.Model)`",`"serial`":`"`"}}"
-		$strCpu="{`"processor`":`"$($VMware_vendor) (x$($VM.NumCpu) cores)`"}"
+		$strCpu="{`"processor`": {`"model`":`"$($VMware_vendor)`",`"cores`":`"$($VM.NumCpu*$VMView.config.hardware.NumCoresPerSocket)`"}}"
 		$strMem="{`"memorybank`": {`"manufacturer`":`"$($VMware_vendor)`",`"capacity`":`"$($VM.MemoryGB*1024)`",`"serial`":`"`"}}"
+		$strDisks=""
+		foreach ($VMDisk in $VM.Guest.disks) {
+			#{"harddisk":{"model":"VMware Virtual disk SCSI Disk Device","size":"107"}}
+			$strdisks="$($strDisks),{`"harddisk`":{`"model`":`"VMware Virtual disk SCSI Disk Device`",`"size`":`"$([math]::Round($VMDisk.CapacityGB))`"}}"
+		}
 		$strOS=$VMGuest.OSFullName
 		
 		#если у нас есть хостнейм (#бывает и нулл)
@@ -137,7 +147,7 @@ foreach( $VM in $VMs) {
 					"domain_id=$($intDomain)&", 
 					"name=$([System.Web.HttpUtility]::UrlEncode($strComp)) &", 
 					"os=$([System.Web.HttpUtility]::UrlEncode($strOS))&",
-					"raw_hw=$([System.Web.HttpUtility]::UrlEncode("$($strCpu),$($strMem)"))&",
+					"raw_hw=$([System.Web.HttpUtility]::UrlEncode("$($strCpu),$($strMem)$($strDisks)"))&",
 					"ignore_hw=1&",
 					"raw_soft=&",
 					"raw_version=$([System.Web.HttpUtility]::UrlEncode($lib_version))&",
