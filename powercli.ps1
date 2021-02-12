@@ -1,4 +1,4 @@
-﻿$lib_version="0.6powercli"
+﻿$lib_version="0.7powercli"
 $VMware_vendor="VMware"
 $VMware_ESXi="$($VMware_vendor) ESXi"
 
@@ -110,10 +110,27 @@ foreach( $VM in $VMs) {
 			if ($VMGuest.HostName.split('.').count -gt 1 ) {
 				$strComp=$VMGuest.HostName.split('.')[0]
 				$strDomain=$VMGuest.HostName.split('.')[1]
+				$intDomain=getInventoryId 'domains' $strDomain
 			} else {
 				$strComp=$VMGuest.HostName
-				$strDomain=$inventory_defaultDomain
+				#если домена нет. будем искать по связке имя+IP
+				Write-Host -foregroundColor Yellow "HOST DOMAIN NOT FOUND, Searching by name and ip: " , name	, ($VMGuest.IPAddress -join " ")
+				Write-Host -foregroundColor Yellow "name=$($strComp)&ip=$($VMGuest.IPAddress -join " ")"
+				$objComp=getInventoryObj 'comps' "search?name=$($strComp)&ip=$($VMGuest.IPAddress -join " ")"
+
+				#если нашли, то вытаскиваем имя домена
+				if ($objComp) {
+					$intDomain=$objComp.domain_id
+					$objDomain=getInventoryObj 'domains' $intDomain
+					$strdomain=$objDomain.name
+					Write-Host -foregroundColor Green "Found Domain:",$intDomain
+				} else {
+					Write-Host -foregroundColor Red "Domain not found, using default: ", $inventory_defaultDomain
+					$strDomain=$inventory_defaultDomain
+					$intDomain=getInventoryId 'domains' $inventory_defaultDomain
+				}
 			}
+
 
 			#Ищем, а есть ли уже в базе наш ESXi хост и есть ли у него АРМ?
 			if ($VM.VMhost.name -match "^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$") {
@@ -135,7 +152,8 @@ foreach( $VM in $VMs) {
 			$strNow=Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 			$strIfaces=$VMGuest.IPAddress -join "`n"
 
-			$intDomain=getInventoryId 'domains' $strDomain
+
+
 			if ([int]$intDomain -gt 0) {
 				#тут короче такая логика, мы узнаем, есть ли эта машина в базе
 				#если она есть, то мы смотрим, есть ли по ней данные от скрипта из ОС (более полный набор)
@@ -180,6 +198,3 @@ foreach( $VM in $VMs) {
 		#$data
 	}
 }
-
-#get-vm | get-vmguest | select vmName,Hostname,OSFullName,GuestFamily,Disks,IPAddress
- 
