@@ -14,7 +14,7 @@ function sendInventoryData() {
 	if ($write_inventory) {
 		try { 
 			$result=Invoke-WebRequest -Uri $uri -Method $method -Body $data -UseBasicParsing
-			spooLog("$($method) $($inventory_RESTapi_URL)/users/$($id) - OK")
+			spooLog("$($method) $($inventory_RESTapi_URL)/$($uri) - OK")
 			return ($result.content | convertFrom-Json)
 		} catch {
 			#spooLog("Error: $($_.Exception.Response.StatusCode.Value__): $($_.Exception.Message)")
@@ -39,14 +39,48 @@ function getInventoryData() {
 
 	#пробуем найти запрошенные данные
 	try { 
-		$obj = ((invoke-WebRequest $webReq -ContentType "text/plain; charset=utf-8" -UseBasicParsing).content | convertFrom-Json)
-		spooLog("GET $webReq - OK")
-		return $obj
-	} catch {
+		$r = [System.Net.WebRequest]::Create($webReq)
+		$resp = $r.GetResponse()        
+
+		#Write-host "Response Headers:"
+		#foreach ($HeaderKey in $resp.Headers) {
+		#	$caption = $HeaderKey.PadLeft(15," ")
+		#	Write-host "$caption`: $($resp.Headers[$HeaderKey])";
+		#}                            
+
+		$reqstream = $resp.GetResponseStream()
+		$sr = New-Object System.IO.StreamReader $reqstream
+		$body = $sr.ReadToEnd()
+		#Write-host "$body"
+		spooLog("GET $webReq - OK ($($resp.StatusCode.Value__))")
+		$obj = ($body | convertFrom-Json)
+		return	$obj
+
+	} catch [System.Net.WebException] {              
+		$resp = $_.Exception.Response
+
+		if ($resp -eq $null) {
+			Write-host $_.Exception
+		} else {
+			$reqstream = $resp.GetResponseStream()
+			$sr = New-Object System.IO.StreamReader $reqstream
+			$body = $sr.ReadToEnd()
+
+			spooLog("GET $($webReq) - ERR $($_.Exception.Response.StatusCode.Value__) // $($_.Exception.Message)")
+			spooLog("Response Headers:")
+			spooLog("$('Status'.PadLeft(30," "))`: $([int]$resp.StatusCode) - $($resp.StatusCode)")
+			foreach ($HeaderKey in $resp.Headers) {
+				$caption = $HeaderKey.PadLeft(30," ")
+				spooLog("$caption`: $($resp.Headers[$HeaderKey])")
+			}
+			spooLog("$('Body'.PadLeft(30," "))`: $body")
+		}                    
+	} catch {            
+		spooLog($_.Exception)
 		#неудача!
-		spooLog("$($webReq) Error: $($_.Exception.Response.StatusCode.Value__): $($_.Exception.Message)")
-		$err=$_.Exception.Response.StatusCode.Value__
-		return $false
+		#spooLog("$($webReq) Error: $($_.Exception.Response.StatusCode.Value__): $($_.Exception.Message)")
+		#$err=$_.Exception.Response.StatusCode.Value__
+		#return $false
 	}
 }
 
