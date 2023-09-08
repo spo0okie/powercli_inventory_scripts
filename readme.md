@@ -3,25 +3,26 @@
  * В операционки хостов пишет реальное железо (модель ЦПУ, число ядер, объем RAM) кроме дисковой подсистемы, т.к. там все сложно
  * В операционки виртуалок пишет число ядер и RAM, чтото про диски я забыл. В след версиях будет)
  
-для работы требуется наличие конфигурационного файла config.priv.ps1 следующего содержания:
-```powershell
-#адрес веб АПИ инвентаризации
-$inventory_RESTapi_URL="http://10.10.30.65:8081/web/api"
-#разрешить запись в инвентаризацию (иначе все изменения будет писать в консоль)
-$write_inventory=$true
+для работы требуется наличие конфигурационного файла config.priv.ps1 (см config.priv.sample.ps1):
 
-#учетные данные для vCenter
-$VMWare_vcenter='center.domain.local'
-$inventory_VMWareUser='DOMAIN\user'
-$inventory_VMWarePassword='someSecretPasswd'
+### Использование
+```poershell
+#обойти все vcenter из списка
+powershell.exe -noprofile -executionpolicy bypass -NonInteractive -file C:\Tools\VM_Inventory\powercli.ps1
 
-#в какой домен определять ОС без домена
-$inventory_defaultDomain='WORKGROUP' 
+#обойти указанный vcenter (из списка, т.к. там учетные данные)
+powershell.exe -noprofile -executionpolicy bypass -NonInteractive -file C:\Tools\VM_Inventory\powercli.ps1 vcenter
 
+#подключиться к указанному vcenter (из списка, т.к. там учетные данные) и обработать одну VM
+powershell.exe -noprofile -executionpolicy bypass -NonInteractive -file C:\Tools\VM_Inventory\powercli.ps1 vcenter vmname
 ```
+
 ### ToDo
  * указание машин для исключения при обходе VMware (девелоп, тестовое окружения)
 ### History
+ * v0.8.2 возможность обработать только один vcenter или одну VM
+ * v0.8.1 сбор МАС адресов интерфейсов
+ * v0.8 все раскидано на библиотеки, сделано логирование ВМ с ошибками в отдельный файл
  * v0.7 Изменен режим обработки ситуации, когда домен VM не удается полчить от гипервизора. Перед подстановкой домена по умолчанию теперь скрипт пытается сначала найти машину в БД по связки имя+ИП адрес, и если не находит, тогда уже подставляет домен по умолчанию.
  * v0.6 Отлажена работа с ядрами. Выгрузка железа переведена на передачу ядер отдельным параметром, добавлена выгрузка дисков
  * v0.5.3 Исправлен поиск VMView для VM (поиск ведется не сравнением строк а через Regexp)
