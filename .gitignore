@@ -1,2 +1,4 @@
 config.priv.ps1
 powercli2.ps1
+powercli_debug.cmd
+*.log
