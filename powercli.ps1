@@ -25,11 +25,16 @@ $global:skip404errors=$true;
 $global:VMLIST=@();
 $global:VMGuests=@{};
 
+$global:partialConnectivity=$false;
+#что-то все сломалось
+#exit
 
 
 spooLog "Loading inventory data...";
 inventoryCacheAllComps;
+$global:InvComps | ConvertTo-Json | Out-File "comps.json"
 
+#exit 
 spooLog "Loading VMWare data"
 
 foreach ($item in $vCentersList) {
@@ -53,8 +58,7 @@ if ($vm.length) {
 spooLog "$( $VMLIST.length ) running VMs loaded."
 
 
-
-$VMLIST
+#$VMLIST
 #$VMGuests;
 
 foreach ($_ in $VMLIST) {

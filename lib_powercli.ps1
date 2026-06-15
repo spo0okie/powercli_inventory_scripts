@@ -50,12 +50,6 @@ function pushVMHostData() {
 		$strFullName=$VMhost.name
 	}
 
-	#Write-Host -ForegroundColor Yellow $strFullName
-
-
-	#write-host -ForegroundColor Green $intComp
-
-	$strNow=getUTCNow
 	$strMb= -join('{"motherboard":{',
 		'"manufacturer":"', $VMhost.Manufacturer ,'",',
 		'"product":"', $VMhost.Model ,'",',
@@ -124,35 +118,31 @@ function pushVMData() {
 		[object]$VM,
 		[object]$objComp=$null
 	)
-	#Log "Parsing $($VM.Name) $($VM.Id)"
-	#запрос дополнительной информации недоступной через Get-VM (нам нужно число ядер на сокет)
-	#три раза переделывал нижнюю строку. Я особо не вчитыался в доку по Get-View
-	#и к сожалению только методом проб и ошибок и кучи потерянного времени пришел к выводу что фильтр
-	#типа name="чтото" работает не сравнением строк а через Regex, а это значит что нужно
-	# 1. Экранировать служебные для регекспа символы
-	# 2. Явно обозначать что мы ищем ^name$ (^-начало строки, а $ - конец) иначе находятся name2, name_clone и т.п.
-	#$VMView=$VM|Get-View # -ViewType VirtualMachine
-	#$VMView=Get-View $VM
-	#$VMGuest=Get-VMGuest $VM #.name | select vmName,Hostname,OSFullName,GuestFamily,Disks,IPAddress
+
 	$VMGuest=getCachedVmGuest($VM);
-	#$VMGuest
-	#$VMView.config.hardware
-	$uuid=getVMUUID $VM;
-	#если у нас есть хостнейм (#бывает и нулл)
+	$uuid=getVMInstanceUUID $VM;
+	$biosId=getVMUUID $VM;
+    $moRef=getVMMoRef $VM;
+    $locationId=getVMLocationUUID $VM;
+
+	#если у нас нет хостнейма (бывает и нулл)
 	if (!$VMGuest.Hostname) {
 		errorLog "VM: $($hostname) ($($VM.Name) : $($uuid)) no hostname"
 		return
 	}
 
+	### Определяем HOSTNAME, FQDN и соответствующую машину в инвентори
 	$strFullName=$VMGuest.HostName;
 	if ($strFullName.split('.').count -gt 1 ) {
 		$strComp=$strFullName.split('.')[0]		
+		#Если узел инвентори не передали, то ищем по FQDN
+		if ( -not $objComp) {
+			debugLog "getting $($strFullName) from inventory"
+			$objComp = getInventoryFqdnComp $strFullName
+		}	
 	} else {
 		$strComp=$strFullName
-		#warningLog "VM: $($strComp) ($($arrIPv4 -join " ")) no DOMAIN in ESXi"
-		#если домена нет. будем искать по связке имя+IP
-		#Write-Host -foregroundColor Yellow "HOST DOMAIN NOT FOUND, Searching by name and ip: " , name, ($VMGuest.IPAddress -join " ")
-		#Write-Host -foregroundColor Yellow "name=$($strFullName)&ip=$($VMGuest.IPAddress -join " ")"
+		#Если узел инвентори не передали, то ищем по связке имя+IP
 		if ( -not $objComp) {
 			$objComp=getInventoryObj 'comps' "$($strFullName)&ip=$($arrIPv4 -join ' ')&expand=domain"
 			#$objComp
@@ -163,15 +153,49 @@ function pushVMData() {
 			$strdomain=$objComp.domain.fqdn
 			$strFullName="$($strFullName).$($strDomain)";
 			warningLog "VM: $strFullName no FQDN hostname in ESXi //found in inventory by IP($($arrIPv4 -join " "))"
-			#Write-Host -foregroundColor Green "Found Domain:",$intDomain
 		} else {
-			#Write-Host -foregroundColor Red "Domain not found, using default: ", $inventory_defaultDomain
+			#Иначе пропускаем эту ВМ, т.к. без FQDN не можем с ней работать
 			errorLog "VM: $($strComp) ($($_.Name) : $($uuid) : $($arrIPv4 -join ' ')) нет FQDN в VMWare (без домена не могу добавить в инвентори)"
 			return
 		}
 	}
 
-	#spooLog "VM parsing $($strFullName)..."
+	# в этом месте кода у нас есть либо переданный $objComp который был найден по UUID вне этого метода (powercli.ps1: $invHost=searchInvByVMUUID($uuid);)
+	# либо его не передавали и мы нашли нужный $objComp сами (по FQDN или hostname+ip)
+	# и тут в случае, если в VMWare есть "клон" машины, и одновременно включены и оригинал и клон, мы можем ошибиться и найти не ту машину в инвентори
+	# поэтому мы проверяем, что полученный из инвентори VMWare.UUID совпадает с тем, что мы получили из VMWare либо вообще отсутствует среди загруженных VM
+	# если UUID совпадает, то все ок 
+	# если UUID не сопадает, то проверяем
+	#     - если в VMWare есть машина с таким UUID, то это значит что мы нашли не ту машину в инвентори и пропускаем ее
+	#     - если в VMWare нет машины с таким UUID, то это значит что мы нашли ту же машину, но она была клонирована/восстановлена в VMWare и мы ее обновляем в инвентори
+	if ($objComp) {
+		$invUUID = $null
+		#безопасно читаем UUID из инвентори, если он там есть
+		if ($objComp.external_links) {
+			$externalLinks = $objComp.external_links | ConvertFrom-Json -ErrorAction SilentlyContinue
+			if ($externalLinks -and $externalLinks.'VMWare.UUID') {
+				$invUUID = $externalLinks.'VMWare.UUID';
+			}
+		}
+        #$invUUID
+		#если он там есть и не совпадает с UUID обрабатываемой VM
+		if (($null -ne $invUUID) -and ($uuid -ne $invUUID)) {
+            spooLog "UUID CHECK"
+			# Check if there is a VM in VMware with the given UUID
+			$existingVM = Get-VM | Where-Object { (getVMInstanceUUID $_) -eq $invUUID }
+
+			if ($existingVM) {
+				errorLog "VM: $($strComp) ($($_.Name) : $($uuid) : $($arrIPv4 -join ' ')) - комп найденный в инвентори по FQDN/hostname привязан к друой VM ($($invUUID)), которая сейчас работает. Вероятно в VMware есть клон не заведенный в инвентори"
+				return
+			}
+		}
+	} 
+
+
+
+
+
+	### Определяем АРМ для машины в инвентори (ESXI host на котором крутится эта VM)
 	#Ищем, а есть ли уже в базе наш ESXi хост и есть ли у него АРМ?
 	if ($VM.VMhost.name -match "^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$") {
 		$strHost="$($VM.VMhost.NetworkInfo.Hostname).$($VM.VMhost.NetworkInfo.DomainName)"
@@ -181,27 +205,17 @@ function pushVMData() {
 	
 	$objESXi=getInventoryFqdnComp $strHost;
 	if ($objESXi -and ($objESXi.arm_id -gt 0)) {
-		#Все есть! Круть!
 		$intArm=[int]($objESXi.arm_id);
 	} else {
-		#нету ножек - нет варенья
 		$intArm=$false
 		errorLog "HOST: $($strHost) без АРМ в инвентори!"
 	}
 
-	#$objComp;	
 
-	#spooLog "parsing $($strFullName) ..."
-    
-
-	#тут короче такая логика, мы узнаем, есть ли эта машина в базе
+	#тут короче такая логика, мы проверяем, есть ли эта машина в базе
 	#если она есть, то мы смотрим, есть ли по ней данные от скрипта из ОС (более полный набор)
 	#если есть, то мы просто помещаем ее в тот, АРМ, на хосте которого она крутится
 	#если нет, то мы полностью отправляем информацию о ней
-	if ( -not $objComp) {
-        	debugLog "getting $($strFullName) from inventory"
-		$objComp = getInventoryFqdnComp $strFullName
-	}
 
 
 	#если компа нет, или он есть, но 
@@ -250,14 +264,20 @@ function pushVMData() {
 			raw_version=[System.Web.HttpUtility]::UrlEncode($lib_version);
 			ip=[System.Web.HttpUtility]::UrlEncode($strIfaces);
 			mac=[System.Web.HttpUtility]::UrlEncode($strIfacesMacs);
-			external_links=$(@{'VMWare.UUID'=$uuid}|ConvertTo-Json);
 		}
 	} else {
 		$data=@{
 			ignore_hw=1;
-			external_links=$(@{'VMWare.UUID'=$uuid}|ConvertTo-Json);
 		}
 	}
+
+    #добавляем ссылки на VM объект
+    $data['external_links']=$(@{
+        'VMWare.UUID'=$uuid;
+        'VMWare.BIOS'=$biosId;
+        'VMWare.location'=$locationId;
+        'VMWare.MoRef'=$moRef;
+    }|ConvertTo-Json);
 
 	#если знаем ОС в инвентори
 	if ($objComp) {
@@ -310,7 +330,7 @@ function loadVM($VM) {
         return;
     }
 	if ($VM.PowerState -eq 'PoweredOn' ) {
-        $uuid=getVMUUID $VM;
+        $uuid=getVMInstanceUUID $VM;
     
         if ( $($vm | Get-HardDisk).Count -eq 0 ) {
             spooLog "VM: $($VM.Name) : $($uuid) : no HDD in VM - skip inventorying"
@@ -383,7 +403,7 @@ function parseVCenter() {
 #Найти в кэше гостевую ОС для этой ВМ 
 function getCachedVmGuest() {
 	param($VM)
-    $uuid=getVMUUID $VM;
+    $uuid=getVMInstanceUUID $VM;
 	return $global:VMGuests[$uuid];
 }
 
@@ -450,9 +470,26 @@ function countVMsHostnameIp() {
 }
 
 
+#BIOS UUID (uuid.bios)
 function getVMUUID($vm) {
-    return "$($vm.PersistentId)@$($vm.Uid.Substring($vm.Uid.IndexOf('@')+1).Split(":")[0])"
+    return "$($vm.ExtensionData.Config.Uuid)@$($vm.Uid.Substring($vm.Uid.IndexOf('@')+1).Split(":")[0])"
 }
+
+#LocationUUID (uuid.location)
+function getVMLocationUUID($vm) {
+    return "$($vm.ExtensionData.Config.LocationId)@$($vm.Uid.Substring($vm.Uid.IndexOf('@')+1).Split(":")[0])"
+}
+
+#Instance UUID (vc.uuid)
+function getVMInstanceUUID($vm) {
+    return "$($vm.ExtensionData.Config.InstanceUuid)@$($vm.Uid.Substring($vm.Uid.IndexOf('@')+1).Split(":")[0])"
+}
+
+#Manged Object Reference (moref)
+function getVMMoRef($vm) {
+    return "$($vm.ExtensionData.MoRef.Value)@$($vm.Uid.Substring($vm.Uid.IndexOf('@')+1).Split(":")[0])"
+}
+
 
 function getVMhostUUID($vmhost) {
     return "$( (Get-VMhost $vmhost.name |Get-View).hardware.systeminfo.uuid )@$($vmhost.Uid.Substring($vmhost.Uid.IndexOf('@')+1).Split(":")[0])"
