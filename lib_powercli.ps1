@@ -68,8 +68,8 @@ function pushVMHostData() {
 	'}}')
 
 	$strOS="$($VMware_ESXi), v$($VMHost.Version)"
-	
-	
+
+
 	$strIfaces=""
 	$strMACs=""
 	foreach ($VMiface in $VMifaces) {
@@ -131,15 +131,26 @@ function pushVMData() {
 		return
 	}
 
+	#вытаскиваем из всех IP адресов только IPv4
+	$arrIPv4=@();
+	foreach ($IP in $VMGuest.IPAddress) {
+		if ($IP -match "^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$") {$arrIPv4 += $IP}
+	}
+
+	$arrMacs=@();
+	foreach ($Nic in $VMGuest.Nics) {
+		$arrMacs += $Nic.MacAddress;
+	}
+
 	### Определяем HOSTNAME, FQDN и соответствующую машину в инвентори
 	$strFullName=$VMGuest.HostName;
 	if ($strFullName.split('.').count -gt 1 ) {
-		$strComp=$strFullName.split('.')[0]		
+		$strComp=$strFullName.split('.')[0]
 		#Если узел инвентори не передали, то ищем по FQDN
 		if ( -not $objComp) {
 			debugLog "getting $($strFullName) from inventory"
 			$objComp = getInventoryFqdnComp $strFullName
-		}	
+		}
 	} else {
 		$strComp=$strFullName
 		#Если узел инвентори не передали, то ищем по связке имя+IP
@@ -164,7 +175,7 @@ function pushVMData() {
 	# либо его не передавали и мы нашли нужный $objComp сами (по FQDN или hostname+ip)
 	# и тут в случае, если в VMWare есть "клон" машины, и одновременно включены и оригинал и клон, мы можем ошибиться и найти не ту машину в инвентори
 	# поэтому мы проверяем, что полученный из инвентори VMWare.UUID совпадает с тем, что мы получили из VMWare либо вообще отсутствует среди загруженных VM
-	# если UUID совпадает, то все ок 
+	# если UUID совпадает, то все ок
 	# если UUID не сопадает, то проверяем
 	#     - если в VMWare есть машина с таким UUID, то это значит что мы нашли не ту машину в инвентори и пропускаем ее
 	#     - если в VMWare нет машины с таким UUID, то это значит что мы нашли ту же машину, но она была клонирована/восстановлена в VMWare и мы ее обновляем в инвентори
@@ -189,20 +200,16 @@ function pushVMData() {
 				return
 			}
 		}
-	} 
-
-
-
-
+	}
 
 	### Определяем АРМ для машины в инвентори (ESXI host на котором крутится эта VM)
 	#Ищем, а есть ли уже в базе наш ESXi хост и есть ли у него АРМ?
 	if ($VM.VMhost.name -match "^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$") {
 		$strHost="$($VM.VMhost.NetworkInfo.Hostname).$($VM.VMhost.NetworkInfo.DomainName)"
-	} else { 
+	} else {
 		$strHost=$VM.VMHost.name
 	}
-	
+
 	$objESXi=getInventoryFqdnComp $strHost;
 	if ($objESXi -and ($objESXi.arm_id -gt 0)) {
 		$intArm=[int]($objESXi.arm_id);
@@ -218,10 +225,10 @@ function pushVMData() {
 	#если нет, то мы полностью отправляем информацию о ней
 
 
-	#если компа нет, или он есть, но 
-	#скрипт обновлявший его содержит префикс powercli 
+	#если компа нет, или он есть, но
+	#скрипт обновлявший его содержит префикс powercli
 	#или нет скрипта
-	if (    `		
+	if (    `
 		(-not ($objComp -is [Object])) `
 		-or `
 		(($objComp -is [Object]) -and (`
@@ -236,34 +243,34 @@ function pushVMData() {
 		foreach ($VMDisk in $VM.Guest.disks) {
 			$strdisks="$($strDisks),{`"harddisk`":{`"model`":`"VMware Virtual disk SCSI Disk Device`",`"size`":`"$([math]::Round($VMDisk.CapacityGB))`"}}"
 		}
+
 		$strOS=$VMGuest.OSFullName
-        if ( -not $strOS ) {
+        if (`
+        	(-not $strOS) `
+         	-and `
+          	(-not ($objComp -is [Object])) `
+        ) {
+        	#ошибку выбрасываем только если в VMWare нет ОС и в инвентаризации нет узла.
+        	#иначе просто не будим пушить ОС в существующую запись в инвентаризации.
+         	#(сценарий с вручную добавленным RouterOS)
 			errorLog "VM: $($strComp) ($($_.Name) : $($uuid) : $($arrIPv4 -join ' ')) нет типа ОС (Linux/Windows) в VMWare (без него не могу добавить в инвентори, обнови VMWare tools)"
 			return
         }
 
-		#вытаскиваем из всех IP адресов только IPv4
-		$arrIPv4=@();
-		foreach ($IP in $VMGuest.IPAddress) {
-			if ($IP -match "^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$") {$arrIPv4 += $IP}
-		}
-
-		$arrMacs=@();
-		foreach ($Nic in $VMGuest.Nics) {
-			$arrMacs += $Nic.MacAddress;
-		}
 
 		$strIfaces=$arrIPv4 -join "`n"
 		$strIfacesMacs=$arrMacs -join "`n"
 		$data=@{
 			name=[System.Web.HttpUtility]::UrlEncode($strFullName);
-			os=[System.Web.HttpUtility]::UrlEncode($strOS);
 			raw_hw=[System.Web.HttpUtility]::UrlEncode("$($strCpu),$($strMem)$($strDisks)");
 			ignore_hw=1;
 			raw_soft="";
 			raw_version=[System.Web.HttpUtility]::UrlEncode($lib_version);
-			ip=[System.Web.HttpUtility]::UrlEncode($strIfaces);
-			mac=[System.Web.HttpUtility]::UrlEncode($strIfacesMacs);
+			ip=$strIfaces; #если тут сделать UrlEncode, То перенос строки потом не разенкодится и многострочные адреса сломаются
+			mac=$strIfacesMacs; #если тут сделать UrlEncode, То перенос строки потом не разенкодится и многострочные адреса сломаются
+		}
+		if ($strOS) {#ИМЯ ос - опционально, т.к. уже может быть в инвентаризации
+			$data['os']=[System.Web.HttpUtility]::UrlEncode($strOS);
 		}
 	} else {
 		$data=@{
@@ -282,12 +289,12 @@ function pushVMData() {
 	#если знаем ОС в инвентори
 	if ($objComp) {
 		$data["id"]=$objComp.id;
-	} 
+	}
 
 	#если нашли текущий АРМ - закрепляем
 	if ($intArm) {
 		$data["arm_id"]=$intArm;
-	} 
+	}
 
 	#$data
 
@@ -331,7 +338,7 @@ function loadVM($VM) {
     }
 	if ($VM.PowerState -eq 'PoweredOn' ) {
         $uuid=getVMInstanceUUID $VM;
-    
+
         if ( $($vm | Get-HardDisk).Count -eq 0 ) {
             spooLog "VM: $($VM.Name) : $($uuid) : no HDD in VM - skip inventorying"
             return;
@@ -400,7 +407,7 @@ function parseVCenter() {
 	spooLog "Vcenter server $($VcenterServer) complete."
 }
 
-#Найти в кэше гостевую ОС для этой ВМ 
+#Найти в кэше гостевую ОС для этой ВМ
 function getCachedVmGuest() {
 	param($VM)
     $uuid=getVMInstanceUUID $VM;
@@ -429,7 +436,7 @@ function getVMIps() {
 
 
 
-#посчитать 
+#посчитать
 function countVMsHostname() {
 	param(
 		[string]$hostname
@@ -446,7 +453,7 @@ function countVMsHostname() {
 }
 
 
-#посчитать 
+#посчитать
 function countVMsHostnameIp() {
 	param(
 		[string]$hostname,

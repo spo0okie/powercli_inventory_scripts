@@ -57,6 +57,28 @@ if ($vm.length) {
 
 spooLog "$( $VMLIST.length ) running VMs loaded."
 
+#DEBUG: дамп собранных данных по VM ДО обработки/отправки.
+#строим через те же аксессоры и тот же кэш ($VMGuests), что и pushVMData,
+#поэтому IPv4 здесь == то, что уйдёт в инвентори.
+#если у нужной VM (различать по MoRef!) тут IP уже пуст - баг в сборе (loadVM/Get-VMGuest),
+#если IP есть - данные теряются между сбором и отправкой.
+$vmDump = foreach ($v in $VMLIST) {
+	$g = getCachedVmGuest $v
+	[pscustomobject]@{
+		Name         = $v.Name
+		MoRef        = getVMMoRef $v
+		InstanceUUID = getVMInstanceUUID $v
+		BIOSUUID     = getVMUUID $v
+		VMHost       = [string]$v.VMHost.Name
+		GuestState   = [string]$g.State
+		GuestHost    = [string]$g.HostName
+		GuestIPs     = @($g.IPAddress)
+		IPv4         = @(getVMIps $v)
+	}
+}
+$vmDump | ConvertTo-Json -Depth 5 | Out-File "vmlist.json" -Encoding UTF8
+spooLog "VM data dumped to vmlist.json ($($VMLIST.length) VMs)"
+
 
 #$VMLIST
 #$VMGuests;
@@ -66,7 +88,7 @@ foreach ($_ in $VMLIST) {
 	$hostname=getVMHostname($_);
 	#$([string]$hostname).toLower();
 	#if (-not(([string]$hostname).toLower() -eq 'erp-prod')) {continue};
-	$uuid=getVMUUID $_;
+	$uuid=getVMInstanceUUID $_;	#ищем по Instance UUID (vc.uuid), т.к. именно он пишется в external_links.VMWare.UUID
 	$invHost=searchInvByVMUUID($uuid);
 	if ($invHost -eq $false ){
 		$VMcount=countVMsHostname($hostname);
